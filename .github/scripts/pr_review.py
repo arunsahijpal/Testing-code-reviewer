@@ -1,7 +1,7 @@
 import os
 import sys
 from typing import List, Dict, Optional
-import openai
+from openai import OpenAI
 from github import Github
 import base64
 import json
@@ -13,6 +13,8 @@ from dataclasses import dataclass
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 @dataclass
 class FileFilterConfig:
@@ -207,7 +209,7 @@ The code to review is from {file_path}:
 
         try:
             logger.debug("Sending request to OpenAI API")
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a senior software engineer performing a code review. ..."},
@@ -216,7 +218,7 @@ The code to review is from {file_path}:
                 temperature=0.2,
                 max_tokens=3000,
             )
-            response_text = response["choices"][0]["message"]["content"]
+            response_text = response.choices[0].message.content
 
             logger.debug(f"OpenAI API raw response: {response_text}")
 
