@@ -14,8 +14,6 @@ from dataclasses import dataclass
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 @dataclass
 class FileFilterConfig:
     whitelist_patterns: List[str]
@@ -70,7 +68,7 @@ class PRReviewer:
         logger.info(f"Initialized with blacklist: {self.file_filter.blacklist_patterns}")
 
         # Initialize API clients
-        openai.api_key = self.openai_key
+        self.openai_client = OpenAI(api_key=self.openai_key)
         self.github = Github(self.github_token)
 
         # Load PR event data
@@ -209,7 +207,7 @@ The code to review is from {file_path}:
 
         try:
             logger.debug("Sending request to OpenAI API")
-            response = client.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a senior software engineer performing a code review. ..."},

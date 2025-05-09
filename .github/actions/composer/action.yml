@@ -3,7 +3,7 @@ description: "Runs a PHP setup with composer validate and composer install"
 inputs:
   php_version:
     description: "PHP Version to run."
-    default: "8.2"
+    default: "8.3"
   composer_version:
     description: "Composer version to run."
     default: "2"
