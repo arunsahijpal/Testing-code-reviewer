@@ -1,0 +1,4 @@
+access_address_form:
+  title: 'access address form'
+  description: 'Permission to access the address form.'
+  restrict access: true
