@@ -29,7 +29,7 @@ function product_custom_preprocess_node(array &$variables) {
     $variables['content']['buy_now_button'] = [
       '#type' => 'container',
       'button' => $buy_now_button,
-      '#weight' => 100,  // Ensure it appears after the 'Add to Cart' button.
+      '#weight' => 100,
     ];
   }
 }
