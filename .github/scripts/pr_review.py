@@ -232,116 +232,116 @@ The code to review is from {file_path}:
             logger.error(f"Error during code review: {e}")
             return []
 
-def run_review(self):
-    """Main method to run the PR review process."""
-    try:
-        changed_files = self.pull_request.get_files()
-        draft_review_comments = []
-        general_comments = []
+    def run_review(self):
+        """Main method to run the PR review process."""
+        try:
+            changed_files = self.pull_request.get_files()
+            draft_review_comments = []
+            general_comments = []
 
-        # Get existing comments to avoid duplicates
-        existing_comments = self.get_existing_comments()
+            # Get existing comments to avoid duplicates
+            existing_comments = self.get_existing_comments()
 
-        skipped_files = []
-        reviewed_files = []
+            skipped_files = []
+            reviewed_files = []
 
-        for file in changed_files:
-            if file.status == "removed":
-                logger.info(f"Skipping removed file: {file.filename}")
-                continue
+            for file in changed_files:
+                if file.status == "removed":
+                    logger.info(f"Skipping removed file: {file.filename}")
+                    continue
 
-            # Check if file should be reviewed based on filters
-            if not self.file_filter.should_review_file(file.filename):
-                logger.info(f"Skipping {file.filename} based on filter configuration")
-                skipped_files.append(file.filename)
-                continue
+                # Check if file should be reviewed based on filters
+                if not self.file_filter.should_review_file(file.filename):
+                    logger.info(f"Skipping {file.filename} based on filter configuration")
+                    skipped_files.append(file.filename)
+                    continue
 
-            reviewed_files.append(file.filename)
-            logger.info(f"Reviewing: {file.filename}")
+                reviewed_files.append(file.filename)
+                logger.info(f"Reviewing: {file.filename}")
 
-            try:
-                content = self.repo.get_contents(file.filename, ref=self.pull_request.head.sha).decoded_content.decode('utf-8')
-            except Exception as e:
-                logger.error(f"Error getting file content: {e}")
-                continue
+                try:
+                    content = self.repo.get_contents(file.filename, ref=self.pull_request.head.sha).decoded_content.decode('utf-8')
+                except Exception as e:
+                    logger.error(f"Error getting file content: {e}")
+                    continue
 
-            if not file.patch:
-                logger.warning(f"No patch found for {file.filename}, skipping inline comments")
-                continue
+                if not file.patch:
+                    logger.warning(f"No patch found for {file.filename}, skipping inline comments")
+                    continue
 
-            # Calculate line positions once per file
-            line_positions = self.calculate_line_positions(file.patch)
-            logger.debug(f"Line positions map for {file.filename}: {line_positions}")
+                # Calculate line positions once per file
+                line_positions = self.calculate_line_positions(file.patch)
+                logger.debug(f"Line positions map for {file.filename}: {line_positions}")
 
-            # Get review comments from OpenAI or other LLM
-            file_comments = self.review_code(content, file.filename)
+                # Get review comments from OpenAI or other LLM
+                file_comments = self.review_code(content, file.filename)
 
-            for comment in file_comments:
-                line_num = comment['line']
-                mapped_line = self.find_closest_line(line_num, line_positions)
+                for comment in file_comments:
+                    line_num = comment['line']
+                    mapped_line = self.find_closest_line(line_num, line_positions)
 
-                if mapped_line is not None:
-                    position = line_positions[mapped_line]
-                    comment_key = f"{file.filename}:{position}"
+                    if mapped_line is not None:
+                        position = line_positions[mapped_line]
+                        comment_key = f"{file.filename}:{position}"
 
-                    if comment_key in existing_comments:
-                        logger.debug(f"Duplicate comment skipped at {comment_key}")
-                        continue
+                        if comment_key in existing_comments:
+                            logger.debug(f"Duplicate comment skipped at {comment_key}")
+                            continue
 
-                    comment_body = f"{comment['comment']}\n\n```suggestion\n{comment.get('suggestion', '')}\n```"
+                        comment_body = f"{comment['comment']}\n\n```suggestion\n{comment.get('suggestion', '')}\n```"
 
-                    draft_review_comments.append({
-                        'path': file.filename,
-                        'position': position,
-                        'body': comment_body
-                    })
-                    logger.debug(f"Queued inline comment at position {position} for {file.filename}")
+                        draft_review_comments.append({
+                            'path': file.filename,
+                            'position': position,
+                            'body': comment_body
+                        })
+                        logger.debug(f"Queued inline comment at position {position} for {file.filename}")
+                    else:
+                        logger.warning(f"Line {line_num} in {file.filename} not found in patch context, adding as general comment")
+                        comment_body = (
+                            f"**In file `{file.filename}`, line {line_num}:**\n\n"
+                            f"{comment['comment']}\n\n"
+                            f"```suggestion\n{comment.get('suggestion', '')}\n```"
+                        )
+                        general_comments.append(comment_body)
+
+            if draft_review_comments or general_comments or skipped_files:
+                logger.info(f"Creating review with {len(draft_review_comments)} inline and {len(general_comments)} general comments")
+
+                review_body = "🤖 Code Review Summary:\n\n"
+
+                if reviewed_files:
+                    review_body += f"Reviewed {len(reviewed_files)} file(s):\n"
+                    for filename in reviewed_files:
+                        review_body += f"- {filename}\n"
+
+                if skipped_files:
+                    review_body += f"\nSkipped {len(skipped_files)} file(s) based on filter configuration:\n"
+                    for filename in skipped_files:
+                        review_body += f"- {filename}\n"
+
+                if draft_review_comments:
+                    review_body += f"\nFound {len(draft_review_comments)} suggestion(s) for improvement."
                 else:
-                    logger.warning(f"Line {line_num} in {file.filename} not found in patch context, adding as general comment")
-                    comment_body = (
-                        f"**In file `{file.filename}`, line {line_num}:**\n\n"
-                        f"{comment['comment']}\n\n"
-                        f"```suggestion\n{comment.get('suggestion', '')}\n```"
-                    )
-                    general_comments.append(comment_body)
+                    review_body += "\n✨ Great job! The code looks clean and well-written."
 
-        if draft_review_comments or general_comments or skipped_files:
-            logger.info(f"Creating review with {len(draft_review_comments)} inline and {len(general_comments)} general comments")
+                if general_comments:
+                    review_body += "\n\n### Additional Comments:\n\n" + "\n\n".join(general_comments)
 
-            review_body = "🤖 Code Review Summary:\n\n"
-
-            if reviewed_files:
-                review_body += f"Reviewed {len(reviewed_files)} file(s):\n"
-                for filename in reviewed_files:
-                    review_body += f"- {filename}\n"
-
-            if skipped_files:
-                review_body += f"\nSkipped {len(skipped_files)} file(s) based on filter configuration:\n"
-                for filename in skipped_files:
-                    review_body += f"- {filename}\n"
-
-            if draft_review_comments:
-                review_body += f"\nFound {len(draft_review_comments)} suggestion(s) for improvement."
+                commit = self.repo.get_commit(self.pull_request.head.sha)
+                self.pull_request.create_review(
+                    commit=commit,
+                    comments=draft_review_comments,
+                    body=review_body,
+                    event="COMMENT"
+                )
+                logger.info("Review created successfully")
             else:
-                review_body += "\n✨ Great job! The code looks clean and well-written."
+                logger.info("No review comments generated")
 
-            if general_comments:
-                review_body += "\n\n### Additional Comments:\n\n" + "\n\n".join(general_comments)
-
-            commit = self.repo.get_commit(self.pull_request.head.sha)
-            self.pull_request.create_review(
-                commit=commit,
-                comments=draft_review_comments,
-                body=review_body,
-                event="COMMENT"
-            )
-            logger.info("Review created successfully")
-        else:
-            logger.info("No review comments generated")
-
-    except Exception as e:
-        logger.error(f"Error in run_review: {e}", exc_info=True)
-        raise
+        except Exception as e:
+            logger.error(f"Error in run_review: {e}", exc_info=True)
+            raise
 
 
 def main():
