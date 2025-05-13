@@ -98,50 +98,43 @@ class PRReviewer:
 
     def calculate_line_positions(self, patch: str) -> Dict[int, int]:
         """
-        Calculate the position of each line in the patch with improved accuracy.
-        Returns a mapping of actual file line numbers to patch positions.
+        Calculate a mapping of actual file line numbers to patch positions.
+        Only maps lines that appear in the new file version (i.e. not removed).
         """
         positions = {}
         lines = patch.split('\n')
         position = 0
         current_line = 0
-        in_hunk = False
 
         logger.debug(f"Processing patch:\n{patch}")
 
         for line in lines:
-            # Parse hunk header
+            # Hunk header: @@ -old_line,old_count +new_line,new_count @@
             if line.startswith('@@'):
-                in_hunk = True
-                match = re.search(r'\@\@ \-\d+,?\d* \+(\d+),?(\d*)', line)
+                match = re.search(r'\@\@ \-\d+,?\d* \+(\d+)', line)
                 if match:
                     current_line = int(match.group(1))
-                    logger.debug(f"Found hunk starting at line {current_line}")
-                    position += 1
-                    continue
-
-            if not in_hunk:
+                    position += 1  # Count the hunk header line
                 continue
 
-            # Track position for every line in the patch
             position += 1
 
-            # Only map lines that are context or additions (not removals)
-            if not line.startswith('-'):
-                if line.startswith('+'):
-                    positions[current_line] = position
-                else:  # Context line
-                    positions[current_line] = position
-                current_line += 1
+            # Skip removed lines from the original file
+            if line.startswith('-'):
+                continue
 
-        logger.debug(f"Line to position mapping: {json.dumps(positions, indent=2)}")
+            # Map context or added lines to the new file's line number
+            positions[current_line] = position
+            current_line += 1
+
+        logger.debug(f"Line-to-position map: {json.dumps(positions, indent=2)}")
         return positions
 
-    def find_closest_line(self, target_line: int, positions: Dict[int, int],
-                         max_distance: int = 3) -> Optional[int]:
+
+    def find_closest_line(self, target_line: int, positions: Dict[int, int], max_distance: int = 3) -> Optional[int]:
         """
-        Find the closest available line in the patch within max_distance.
-        Returns actual line number if found, None if no suitable line is found.
+        Find the closest available line number in the patch mapping within max_distance.
+        Returns the line number from the file if found, otherwise None.
         """
         if target_line in positions:
             return target_line
@@ -150,13 +143,15 @@ class PRReviewer:
         if not available_lines:
             return None
 
-        # Find closest line that's within max_distance
-        closest_line = min(available_lines,
-                          key=lambda x: abs(x - target_line))
-
+        # Find the closest line based on absolute distance
+        closest_line = min(available_lines, key=lambda x: abs(x - target_line))
         if abs(closest_line - target_line) <= max_distance:
+            logger.debug(f"Mapped line {target_line} -> closest line {closest_line} within distance {max_distance}")
             return closest_line
+
+        logger.debug(f"No line within {max_distance} lines of {target_line}")
         return None
+
 
     def review_code(self, code: str, file_path: str) -> List[Dict]:
         """Send code to OpenAI API for review."""
@@ -237,121 +232,117 @@ The code to review is from {file_path}:
             logger.error(f"Error during code review: {e}")
             return []
 
-    def run_review(self):
-        """Main method to run the PR review process."""
-        try:
-            changed_files = self.pull_request.get_files()
-            draft_review_comments = []
-            general_comments = []
+def run_review(self):
+    """Main method to run the PR review process."""
+    try:
+        changed_files = self.pull_request.get_files()
+        draft_review_comments = []
+        general_comments = []
 
-            # Get existing comments to avoid duplicates
-            existing_comments = self.get_existing_comments()
+        # Get existing comments to avoid duplicates
+        existing_comments = self.get_existing_comments()
 
-            skipped_files = []
-            reviewed_files = []
+        skipped_files = []
+        reviewed_files = []
 
-            for file in changed_files:
-                if file.status == "removed":
-                    logger.info(f"Skipping removed file: {file.filename}")
-                    continue
+        for file in changed_files:
+            if file.status == "removed":
+                logger.info(f"Skipping removed file: {file.filename}")
+                continue
 
-                # Check if file should be reviewed based on filters
-                if not self.file_filter.should_review_file(file.filename):
-                    logger.info(f"Skipping {file.filename} based on filter configuration")
-                    skipped_files.append(file.filename)
-                    continue
+            # Check if file should be reviewed based on filters
+            if not self.file_filter.should_review_file(file.filename):
+                logger.info(f"Skipping {file.filename} based on filter configuration")
+                skipped_files.append(file.filename)
+                continue
 
-                reviewed_files.append(file.filename)
-                logger.info(f"Reviewing: {file.filename}")
+            reviewed_files.append(file.filename)
+            logger.info(f"Reviewing: {file.filename}")
 
-                # Get file content
-                try:
-                    content = self.repo.get_contents(file.filename, ref=self.pull_request.head.sha).decoded_content.decode('utf-8')
-                except Exception as e:
-                    logger.error(f"Error getting file content: {e}")
-                    continue
+            try:
+                content = self.repo.get_contents(file.filename, ref=self.pull_request.head.sha).decoded_content.decode('utf-8')
+            except Exception as e:
+                logger.error(f"Error getting file content: {e}")
+                continue
 
-                # Calculate line positions in the patch
-                if file.patch:
-                    line_positions = self.calculate_line_positions(file.patch)
-                    logger.debug(f"Line positions map: {line_positions}")
+            if not file.patch:
+                logger.warning(f"No patch found for {file.filename}, skipping inline comments")
+                continue
+
+            # Calculate line positions once per file
+            line_positions = self.calculate_line_positions(file.patch)
+            logger.debug(f"Line positions map for {file.filename}: {line_positions}")
+
+            # Get review comments from OpenAI or other LLM
+            file_comments = self.review_code(content, file.filename)
+
+            for comment in file_comments:
+                line_num = comment['line']
+                mapped_line = self.find_closest_line(line_num, line_positions)
+
+                if mapped_line is not None:
+                    position = line_positions[mapped_line]
+                    comment_key = f"{file.filename}:{position}"
+
+                    if comment_key in existing_comments:
+                        logger.debug(f"Duplicate comment skipped at {comment_key}")
+                        continue
+
+                    comment_body = f"{comment['comment']}\n\n```suggestion\n{comment.get('suggestion', '')}\n```"
+
+                    draft_review_comments.append({
+                        'path': file.filename,
+                        'position': position,
+                        'body': comment_body
+                    })
+                    logger.debug(f"Queued inline comment at position {position} for {file.filename}")
                 else:
-                    logger.warning(f"No patch found for {file.filename}")
-                    continue
+                    logger.warning(f"Line {line_num} in {file.filename} not found in patch context, adding as general comment")
+                    comment_body = (
+                        f"**In file `{file.filename}`, line {line_num}:**\n\n"
+                        f"{comment['comment']}\n\n"
+                        f"```suggestion\n{comment.get('suggestion', '')}\n```"
+                    )
+                    general_comments.append(comment_body)
 
-                # Get review comments from OpenAI
-                file_comments = self.review_code(content, file.filename)
+        if draft_review_comments or general_comments or skipped_files:
+            logger.info(f"Creating review with {len(draft_review_comments)} inline and {len(general_comments)} general comments")
 
-                # Convert comments to GitHub review format
-                for comment in file_comments:
-                            line_num = comment['line']
+            review_body = "🤖 Code Review Summary:\n\n"
 
-                            if file.patch:
-                                line_positions = self.calculate_line_positions(file.patch)
-                                logger.debug(f"Line positions map: {line_positions}")
+            if reviewed_files:
+                review_body += f"Reviewed {len(reviewed_files)} file(s):\n"
+                for filename in reviewed_files:
+                    review_body += f"- {filename}\n"
 
-                                # Find appropriate line to attach comment to
-                                mapped_line = self.find_closest_line(line_num, line_positions)
+            if skipped_files:
+                review_body += f"\nSkipped {len(skipped_files)} file(s) based on filter configuration:\n"
+                for filename in skipped_files:
+                    review_body += f"- {filename}\n"
 
-                                if mapped_line is not None:
-                                    position = line_positions[mapped_line]
-                                    logger.debug(f"Mapping comment from line {line_num} to position {position} (line {mapped_line} in patch)")
-
-                                    comment_body = f"{comment['comment']}\n\n```suggestion\n{comment.get('suggestion', '')}\n```"
-                                    comment_key = f"{file.filename}:{position}"
-
-                                    # Check if we already have a similar comment
-                                    if comment_key not in existing_comments:
-                                        draft_review_comments.append({
-                                            'path': file.filename,
-                                            'position': position,
-                                            'body': comment_body
-                                        })
-                                else:
-                                    logger.warning(f"Line {line_num} not found in patch context")
-                                    comment_body = f"**In file {file.filename}, line {line_num}:**\n\n{comment['comment']}\n\n```suggestion\n{comment.get('suggestion', '')}\n```"
-                                    general_comments.append(comment_body)
-                            else:
-                                logger.warning(f"No patch found for {file.filename}")
-                                continue
-
-            if draft_review_comments or general_comments or skipped_files:
-                logger.info(f"Creating review with {len(draft_review_comments)} inline comments and {len(general_comments)} general comments")
-
-                review_body = "🤖 Code Review Summary:\n\n"
-
-                if reviewed_files:
-                    review_body += f"Reviewed {len(reviewed_files)} files:\n"
-                    for filename in reviewed_files:
-                        review_body += f"- {filename}\n"
-
-                if skipped_files:
-                    review_body += f"\nSkipped {len(skipped_files)} files based on filter configuration:\n"
-                    for filename in skipped_files:
-                        review_body += f"- {filename}\n"
-
-                if draft_review_comments:
-                    review_body += f"\nFound {len(draft_review_comments)} suggestions for improvement."
-                else:
-                    review_body += "\n✨ Great job! The code looks clean and well-written."
-
-                if general_comments:
-                    review_body += "\n\n### Additional Comments:\n\n" + "\n\n".join(general_comments)
-
-                commit = self.repo.get_commit(self.pull_request.head.sha)
-                self.pull_request.create_review(
-                    commit=commit,
-                    comments=draft_review_comments,
-                    body=review_body,
-                    event="COMMENT"
-                )
-                logger.info("Review created successfully")
+            if draft_review_comments:
+                review_body += f"\nFound {len(draft_review_comments)} suggestion(s) for improvement."
             else:
-                logger.info("No files were reviewed or no comments to make")
+                review_body += "\n✨ Great job! The code looks clean and well-written."
 
-        except Exception as e:
-            logger.error(f"Error in run_review: {e}", exc_info=True)
-            raise
+            if general_comments:
+                review_body += "\n\n### Additional Comments:\n\n" + "\n\n".join(general_comments)
+
+            commit = self.repo.get_commit(self.pull_request.head.sha)
+            self.pull_request.create_review(
+                commit=commit,
+                comments=draft_review_comments,
+                body=review_body,
+                event="COMMENT"
+            )
+            logger.info("Review created successfully")
+        else:
+            logger.info("No review comments generated")
+
+    except Exception as e:
+        logger.error(f"Error in run_review: {e}", exc_info=True)
+        raise
+
 
 def main():
     try:

@@ -3,7 +3,7 @@ description: "Runs a PHP setup with composer validate and composer install"
 inputs:
   php_version:
     description: "PHP Version to run."
-    default: "8.3"
+    default: "8.2"
   composer_version:
     description: "Composer version to run."
     default: "2"
@@ -34,6 +34,5 @@ runs:
       env:
         COMPOSER: "composer.json"
       with:
-        php_version: ${{ inputs.php_version }}
         version: ${{ inputs.composer_version }}
         args: "--ignore-platform-reqs --optimize-autoloader"
