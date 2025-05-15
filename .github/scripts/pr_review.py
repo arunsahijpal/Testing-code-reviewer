@@ -10,6 +10,21 @@ import re
 from fnmatch import fnmatch
 from dataclasses import dataclass
 
+
+def parse_ai_response(raw_response: str):
+    """
+    Safely parse AI response content into JSON.
+    Handles unescaped backslashes (e.g., \Drupal) which break json.loads.
+    """
+    try:
+        # Escape any unescaped backslashes not part of a valid escape sequence
+        safe_response = re.sub(r'(?<!\\)\\(?![\\/"bfnrtu])', r'\\\\', raw_response)
+        return json.loads(safe_response)
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse OpenAI's response as JSON: {e}")
+        return []
+
+
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -217,7 +232,7 @@ The code to review is from {file_path}:
             logger.debug(f"OpenAI API raw response: {response_text}")
 
             try:
-                review_comments = json.loads(response_text)
+                review_comments = parse_ai_response(response_text)
                 if not isinstance(review_comments, list):
                     logger.error("OpenAI's response is not a JSON array")
                     return []
