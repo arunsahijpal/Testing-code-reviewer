@@ -98,8 +98,8 @@ class PRReviewer:
 
     def calculate_line_positions(self, patch: str) -> Dict[int, int]:
         """
-        Calculate a mapping of actual file line numbers to patch positions.
-        Only maps lines that appear in the new file version (i.e. not removed).
+        Map new file line numbers to diff positions, counting all diff lines for position,
+        but only tracking lines that are visible in the new version (context or additions).
         """
         positions = {}
         lines = patch.split('\n')
@@ -109,23 +109,24 @@ class PRReviewer:
         logger.debug(f"Processing patch:\n{patch}")
 
         for line in lines:
-            # Hunk header: @@ -old_line,old_count +new_line,new_count @@
-            if line.startswith('@@'):
-                match = re.search(r'\@\@ \-\d+,?\d* \+(\d+)', line)
-                if match:
-                    current_line = int(match.group(1))
-                    position += 1  # Count the hunk header line
-                continue
-
             position += 1
 
-            # Skip removed lines from the original file
-            if line.startswith('-'):
+            # Hunk header, extract the new file starting line
+            if line.startswith('@@'):
+                match = re.search(r'@@ -\d+(?:,\d+)? \+(\d+)', line)
+                if match:
+                    current_line = int(match.group(1)) - 1  # Adjust before increment
                 continue
 
-            # Map context or added lines to the new file's line number
-            positions[current_line] = position
-            current_line += 1
+            if line.startswith('+') and not line.startswith('+++'):
+                current_line += 1
+                positions[current_line] = position
+            elif line.startswith('-') and not line.startswith('---'):
+                continue  # Old line, not present in new file
+            else:
+                # Context line
+                current_line += 1
+                positions[current_line] = position
 
         logger.debug(f"Line-to-position map: {json.dumps(positions, indent=2)}")
         return positions
@@ -133,24 +134,24 @@ class PRReviewer:
 
     def find_closest_line(self, target_line: int, positions: Dict[int, int], max_distance: int = 3) -> Optional[int]:
         """
-        Find the closest available line number in the patch mapping within max_distance.
-        Returns the line number from the file if found, otherwise None.
+        Find the closest matching line number in the diff position map.
+        Only returns a match if it's within `max_distance`.
         """
         if target_line in positions:
             return target_line
 
-        available_lines = sorted(positions.keys())
-        if not available_lines:
+        if not positions:
+            logger.debug("No available positions to match against.")
             return None
 
-        # Find the closest line based on absolute distance
-        closest_line = min(available_lines, key=lambda x: abs(x - target_line))
+        closest_line = min(positions.keys(), key=lambda x: abs(x - target_line))
         if abs(closest_line - target_line) <= max_distance:
-            logger.debug(f"Mapped line {target_line} -> closest line {closest_line} within distance {max_distance}")
+            logger.debug(f"Mapped target line {target_line} -> closest line {closest_line} within distance {max_distance}")
             return closest_line
 
-        logger.debug(f"No line within {max_distance} lines of {target_line}")
+        logger.debug(f"No diff line found within {max_distance} of target line {target_line}")
         return None
+
 
 
     def review_code(self, code: str, file_path: str) -> List[Dict]:
@@ -336,6 +337,7 @@ The code to review is from {file_path}:
                     event="COMMENT"
                 )
                 logger.info("Review created successfully")
+                logger.debug(f"Inline comment payload: {json.dumps(draft_review_comments, indent=2)}")
             else:
                 logger.info("No review comments generated")
 
