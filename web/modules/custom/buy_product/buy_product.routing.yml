@@ -1,0 +1,7 @@
+buy_product.form:
+  path: '/buy-product'
+  defaults:
+    _form: '\Drupal\buy_product\Form\AddressForm'
+    _title: 'Buy a product'
+  requirements:
+    _permission: 'access_address_form'
