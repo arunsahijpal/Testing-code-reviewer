@@ -13,15 +13,18 @@ from dataclasses import dataclass
 
 def parse_ai_response(raw_response: str):
     """
-    Safely parse AI response content into JSON.
-    Handles unescaped backslashes (e.g., \Drupal) which break json.loads.
+    Safely parses OpenAI response to JSON, fixing common issues like unescaped backslashes.
     """
+    import re
+
     try:
-        # Escape any unescaped backslashes not part of a valid escape sequence
-        safe_response = re.sub(r'(?<!\\)\\(?![\\/"bfnrtu])', r'\\\\', raw_response)
-        return json.loads(safe_response)
+        # Fix common invalid escapes like \D or \M
+        corrected = re.sub(r'\\(?![\\/"bfnrtu])', r'\\\\', raw_response)
+
+        return json.loads(corrected)
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse OpenAI's response as JSON: {e}")
+        logger.debug(f"Raw response for debugging:\n{raw_response}")
         return []
 
 
