@@ -281,12 +281,16 @@ The code to review is from {file_path}:
                     line_num = comment['line']
                     mapped_line = self.find_closest_line(line_num, line_positions)
 
-                    if mapped_line is not None:
+                    if mapped_line in line_positions:
                         position = line_positions[mapped_line]
                         comment_key = f"{file.filename}:{position}"
 
                         if comment_key in existing_comments:
                             logger.debug(f"Duplicate comment skipped at {comment_key}")
+                            continue
+
+                        if position is None or not isinstance(position, int):
+                            logger.warning(f"Invalid position for comment at line {line_num} in {file.filename}, skipping")
                             continue
 
                         comment_body = f"{comment['comment']}\n\n```suggestion\n{comment.get('suggestion', '')}\n```"
@@ -298,13 +302,14 @@ The code to review is from {file_path}:
                         })
                         logger.debug(f"Queued inline comment at position {position} for {file.filename}")
                     else:
-                        logger.warning(f"Line {line_num} in {file.filename} not found in patch context, adding as general comment")
+                        logger.warning(f"Skipping invalid comment at unmapped line {line_num} in {file.filename}")
                         comment_body = (
                             f"**In file `{file.filename}`, line {line_num}:**\n\n"
                             f"{comment['comment']}\n\n"
                             f"```suggestion\n{comment.get('suggestion', '')}\n```"
                         )
                         general_comments.append(comment_body)
+
 
             if draft_review_comments or general_comments or skipped_files:
                 logger.info(f"Creating review with {len(draft_review_comments)} inline and {len(general_comments)} general comments")
@@ -330,6 +335,7 @@ The code to review is from {file_path}:
                     review_body += "\n\n### Additional Comments:\n\n" + "\n\n".join(general_comments)
 
                 commit = self.repo.get_commit(self.pull_request.head.sha)
+                logger.debug(f"Inline comment payload: {json.dumps(draft_review_comments, indent=2)}")
                 self.pull_request.create_review(
                     commit=commit,
                     comments=draft_review_comments,
