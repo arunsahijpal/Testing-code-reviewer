@@ -20,6 +20,10 @@ runs:
       shell: bash
       run: composer validate --no-check-all
 
+    - name: Clear Composer Cache
+      run: composer clear-cache
+
+
     - name: Check composer.lock
       shell: bash
       run: |
