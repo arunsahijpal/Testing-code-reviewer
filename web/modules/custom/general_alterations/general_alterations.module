@@ -1,0 +1,77 @@
+<?php
+
+/**
+ * @file
+ * Primary module hooks for general_alterations module.
+ */
+
+use Drupal\ckeditor5\Plugin\CKEditor5PluginDefinition;
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Form\FormStateInterface;
+
+/**
+ * Implements hook_entity_base_field_info_alter().
+ */
+function general_alterations_entity_base_field_info_alter(array &$fields, EntityTypeInterface $entity_type) {
+  if ($entity_type->id() === 'node' && isset($fields['title'])) {
+    // Add the custom validation constraint to the title field.
+    $fields['title']->addConstraint('MaxTitleWordLengthConstraint');
+  }
+}
+
+/**
+ * Enables upload of SVGs and WebP images in the CKEditor.
+ *
+ * Implements hook_ckeditor5_plugin_info_alter().
+ */
+function general_alterations_ckeditor5_plugin_info_alter(array &$plugin_definitions): void {
+  $image_upload_plugin_definition = $plugin_definitions['ckeditor5_imageUpload']->toArray();
+  $image_upload_plugin_definition['ckeditor5']['config']['image']['upload']['types'][] = 'webp';
+  $image_upload_plugin_definition['ckeditor5']['config']['image']['upload']['types'][] = 'svg+xml';
+  $plugin_definitions['ckeditor5_imageUpload'] = new CKEditor5PluginDefinition($image_upload_plugin_definition);
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function general_alterations_form_views_exposed_form_alter(array &$form, FormStateInterface $form_state, $form_id) {
+  if ($form['#id'] == 'views-exposed-form-listing-page-press-release-block') {
+    if (isset($form['month_filter'])) {
+      $form['month_filter']['#options'][NULL] = "Months";
+    }
+    if (isset($form['year_filter'])) {
+      $form['year_filter']['#options'] = get_year_range("field_pr_date", "press_release");
+    }
+  }
+
+  if ($form['#id'] == 'views-exposed-form-listing-page-news-block') {
+    if (isset($form['month_filter'])) {
+      $form['month_filter']['#options'][NULL] = "Months";
+    }
+    if (isset($form['year_filter'])) {
+      $form['year_filter']['#options'] = get_year_range("field_news_date", "news");
+    }
+  }
+}
+
+/**
+ * Returns year range.
+ */
+function get_year_range(string $date_field, string $bundle) {
+  $result_field = $date_field . "_value";
+  $node_field =  "node__" . $date_field;
+  $database = \Drupal::database();
+  $min_year = $database->query("SELECT YEAR(MIN($result_field)) as min_year FROM {$node_field} WHERE bundle = '$bundle'")->fetchField();
+  $max_year = $database->query("SELECT YEAR(MAX($result_field)) as max_year FROM {$node_field} WHERE bundle = '$bundle'")->fetchField();
+  
+  // Generate all years between min and max
+  $years = [NULL => 'Year'];
+  if ($min_year && $max_year) {
+    for ($year = $max_year; $year >= $min_year; $year--) {
+      $years[$year] = $year;
+    }
+  }
+  
+  return $years;
+}
+

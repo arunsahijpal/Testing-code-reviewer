@@ -1,0 +1,7 @@
+name: 'general_alterations'
+type: module
+description: 'Handles general customization for birlasoft.'
+package: Custom
+core_version_requirement: ^10 || ^11
+dependencies:
+  - drupal:node
