@@ -15,6 +15,12 @@ runs:
       with:
         php-version: ${{ inputs.php_version }}
         extensions: gd
+    - name: Ensure dev dependencies are in lock file
+      shell: bash
+      run: |
+        composer require --dev drupal/core-dev drupal/coder dealerdirect/phpcodesniffer-composer-installer --no-update
+        composer update drupal/core-dev drupal/coder dealerdirect/phpcodesniffer-composer-installer --with-dependencies
+
 
     - name: Validate composer.json
       shell: bash

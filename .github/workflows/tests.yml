@@ -22,12 +22,6 @@ jobs:
         with:
           fetch-depth: 0
           submodules: true
-      - name: Ensure dev dependencies are in lock file
-        shell: bash
-        run: |
-          composer require --dev drupal/core-dev drupal/coder dealerdirect/phpcodesniffer-composer-installer --no-update
-          composer update drupal/core-dev drupal/coder dealerdirect/phpcodesniffer-composer-installer --with-dependencies
-
 
       # Using our custom composite action to run composer checks and composer install.
       - name: Composer validate and install
